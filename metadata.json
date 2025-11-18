@@ -1,0 +1,5 @@
+{
+  "name": "AI Studio Sandbox",
+  "description": "An AI assistant that can generate and run interactive tools, applications, and games in a sandbox environment. It features a chat interface for interaction and a persistent desktop-like iframe for the generated UI.",
+  "requestFramePermissions": []
+}
