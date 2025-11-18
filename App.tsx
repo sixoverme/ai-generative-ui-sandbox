@@ -23,8 +23,9 @@ const App: React.FC = () => {
     "    *   **CRITICAL**: The final line of your app's `<script>` tag MUST dispatch a custom event to signal when it is ready. Example: `window.dispatchEvent(new CustomEvent('app-ready', { detail: { appId: 'your-app-id' } }));`\n\n" +
     "2.  **App Interaction**: When asked to interact with an app, respond *only* with a JavaScript code block.\n" +
     "    *   **IMPORTANT**: The system will try to infer the target application ID from your script if you use `document.getElementById('your-app-id')` or `document.querySelector('#your-app-id')`.\n" +
-    "    *   **BEST PRACTICE**: To ensure accuracy, it is still highly recommended that the very first line of your script is a comment specifying the target app's ID. Example: `// Target App: your-app-id`\n" +
+    "    *   **MANDATORY**: The very first line of your script MUST be a comment specifying the target app's ID. Example: `// Target App: your-app-id`\n" +
     "    *   The sandbox will wait for the app to be ready before running your script, so you can assume its DOM elements are available.\n\n" +
+    "3.  **Conversational Responses**: Do not engage in conversational chit-chat. Respond only with the requested HTML or JavaScript code. Any additional explanatory text should be included as comments within the code itself.\n\n" +
     "### Examples\n\n" +
     "**Creation Example (Pixel Art Editor):**\n" +
     "```html\n" +
