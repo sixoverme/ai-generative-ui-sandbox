@@ -308,7 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // If no comment, try to infer from document.getElementById or document.querySelector
-    const idMatch = script.match(/(?:document\\.getElementById|document\\.querySelector)\\(['"]([\\w-]+)['"]\\)/);
+    const idMatch = script.match(/(?:document\\.getElementById|document\\.querySelector)\\(['"]#?([\\w-]+)['"]\\)/);
     if (idMatch && idMatch[1]) {
       return idMatch[1];
     }
@@ -328,7 +328,24 @@ document.addEventListener('DOMContentLoaded', () => {
           initializeWindow(newNode);
       }
     } else if (type === 'RUN_SCRIPT') {
-      const appId = parseTargetApp(payload);
+      let appId = parseTargetApp(payload);
+
+      // Fallback to the top-most window if no app is targeted
+      if (!appId) {
+        let topZ = -1;
+        let topAppId = null;
+        for (const [id, state] of windowStates.entries()) {
+          if (!state.minimized && state.zIndex > topZ) {
+            topZ = state.zIndex;
+            topAppId = id;
+          }
+        }
+        if (topAppId) {
+            console.log("No app ID found in script, falling back to top-most window: ", topAppId);
+            appId = topAppId;
+        }
+      }
+
       if (appId && readyApps.has(appId)) {
         // App is ready, run immediately
         try {
@@ -345,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
         scriptQueue.get(appId).push(payload);
       } else {
         // Strict mode: No target, no execution.
-        const reason = 'Interaction script failed: No "// Target App: <app-id>" comment found.';
+        const reason = 'Interaction script failed: No target application could be identified.';
         console.error(reason);
         window.parent.postMessage({ type: 'INTERACTION_FAILED', payload: { reason } }, '*');
       }
