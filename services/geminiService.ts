@@ -6,14 +6,15 @@ import { Message } from '../types';
  * This function is designed to be robust against various response formats.
  *
  * @param text The raw text from the Gemini API response.
- * @returns An object with conversational text, extracted HTML, and extracted script, if any.
+ * @returns An object with conversational text, extracted title, HTML, and script, if any.
  */
-function extractResponseParts(text: string): { text: string; html: string | null; script: string | null } {
+function extractResponseParts(text: string): { text: string; title: string | null; html: string | null; script: string | null } {
     let conversationalText = text;
+    let title: string | null = null;
     let html: string | null = null;
     let script: string | null = null;
 
-    // 1. Extract JavaScript code block
+    // 1. Extract JavaScript code block (for interaction)
     const scriptRegex = /```javascript\s*([\s\S]*?)\s*```/;
     const scriptMatch = conversationalText.match(scriptRegex);
     if (scriptMatch && scriptMatch[1]) {
@@ -21,29 +22,35 @@ function extractResponseParts(text: string): { text: string; html: string | null
         conversationalText = conversationalText.replace(scriptMatch[0], '').trim();
     }
 
-    // 2. Extract HTML content (app window)
-    const htmlRegex = /(<div[^>]+class=(?:"[^"]*ai-app-window[^"]*"|'[^']*ai-app-window[^']*')[\s\S]*<\/div>)/;
-    const markdownHtmlRegex = /(?:```|''')(?:html)?\s*([\s\S]*?<div[^>]+(?:class="[^"]*ai-app-window[^"]*"|class='[^']*ai-app-window[^']*')[\s\S]*?)\s*(?:```|''')/;
-    
-    let htmlMatch = conversationalText.match(markdownHtmlRegex);
+    // 2. Extract JSON block for the title
+    const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
+    const jsonMatch = conversationalText.match(jsonRegex);
+    if (jsonMatch && jsonMatch[1]) {
+        try {
+            const parsedJson = JSON.parse(jsonMatch[1]);
+            if (parsedJson && parsedJson.title) {
+                title = parsedJson.title;
+            }
+        } catch (e) {
+            console.error("Failed to parse title JSON:", e);
+        }
+        conversationalText = conversationalText.replace(jsonMatch[0], '').trim();
+    }
+
+    // 3. Extract HTML content
+    const htmlRegex = /```html\s*([\s\S]*?)\s*```/;
+    const htmlMatch = conversationalText.match(htmlRegex);
     if (htmlMatch && htmlMatch[1]) {
         html = htmlMatch[1].trim();
         conversationalText = conversationalText.replace(htmlMatch[0], '').trim();
-    } else {
-        htmlMatch = conversationalText.match(htmlRegex);
-        if (htmlMatch && htmlMatch[0]) {
-            html = htmlMatch[0].trim();
-            conversationalText = conversationalText.replace(htmlMatch[0], '').trim();
-        }
     }
 
-    // 3. Set default text if needed
+    // 4. Set default text if needed
     if (!conversationalText && (html || script)) {
         conversationalText = 'I have performed the requested action in the sandbox.';
     }
 
-
-    return { text: conversationalText, html, script };
+    return { text: conversationalText, title, html, script };
 }
 
 export const getAvailableModels = async (apiKey: string): Promise<string[]> => {
@@ -65,10 +72,10 @@ export const getAvailableModels = async (apiKey: string): Promise<string[]> => {
 
 export const parseAiResponse = async (
     apiKey: string,
-    model: string, 
-    history: Message[], 
+    model: string,
+    history: Message[],
     systemInstruction: string
-): Promise<{ text: string; html: string | null; script: string | null; }> => {
+): Promise<{ text: string; title: string | null; html: string | null; script: string | null; }> => {
     if (!apiKey) {
         throw new Error("API key is required to generate content.");
     }

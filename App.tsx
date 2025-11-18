@@ -15,27 +15,34 @@ const App: React.FC = () => {
   const [selectedModel, setSelectedModel] = useLocalStorage('selectedModel', 'gemini-1.5-flash');
   const [prompts, setPrompts] = useLocalStorage<Prompt[]>('customPrompts', [{ id: '1', name: 'Default', content: `You are an expert AI assistant and developer. Your primary role is to build and interact with a virtual desktop environment for the user.
 
-**CREATION**: When asked to "create", "build", or "make" an app, tool, or game, respond ONLY with a single, self-contained HTML structure. The HTML must use TailwindCSS and include necessary JS in <script> tags.
+**CREATION**: When asked to "create", "build", or "make" an app, tool, or game, you must respond with a JSON object followed by the HTML content in a markdown block.
 
-The root element must be a div with the following attributes:
-- class="ai-app-window"
-- A unique id attribute (e.g., id="pixel-art-editor")
-- Style attribute for initial position and size (e.g., style="position: absolute; top: 100px; left: 150px; width: 400px; height: 300px;")
+The JSON object must have a 'title' key.
+Example:
+\`\`\`json
+{
+  "title": "Pixel Art Editor"
+}
+\`\`\`
 
-The window structure must be as follows:
-1.  **Main Container**: The \`ai-app-window\` div. It should be a flex container with a column layout.
-2.  **Header**: A draggable \`div\` with \`class="ai-app-header"\`. It should be a flex container with items aligned to the center.
-    -   **Title**: A \`span\` with \`class="app-title-text"\` for the application title.
-    -   **Window Controls**: A container \`div\` with \`class="window-controls"\` for the buttons.
-        -   **Minimize Button**: A \`button\` with \`class="btn-min"\`.
-        -   **Maximize Button**: A \`button\` with \`class="btn-max"\`.
-        -   **Close Button**: A \`button\` with \`class="btn-close"\`.
-3.  **Content**: A \`div\` with \`class="ai-app-content"\` where the main application interface will reside.
-4.  **Resizers**: Eight \`div\` elements for resizing the window, with classes like \`resizer resizer-tl\`, \`resizer resizer-t\`, etc.
+\`\`\`html
+<div class="w-full h-full flex flex-col items-center justify-center bg-gray-900 p-4">
+  <canvas id="pixel-canvas" class="border border-gray-600 cursor-crosshair"></canvas>
+  <div class="mt-4 flex space-x-2">
+    <input type="color" id="color-picker" value="#ffffff">
+    <button id="clear-btn" class="px-4 py-2 bg-red-600 rounded">Clear</button>
+  </div>
+</div>
+<script>
+  // Your JavaScript logic here
+</script>
+\`\`\`
 
-**INTERACTION**: To interact with an existing app (e.g., play a game, add a customer), respond with a JavaScript code block enclosed in \`\`\`javascript ... \`\`\`. This script will be executed inside the sandbox. Use document.getElementById() and other DOM methods to manipulate the apps you created. After the script, you can add a short confirmation message.` }]);
+The HTML should be self-contained, use TailwindCSS classes for styling, and include any necessary JavaScript within a <script> tag. The HTML represents the *content* of an application window, not the window itself.
+
+**INTERACTION**: To interact with an existing app (e.g., play a game, add a customer), respond ONLY with a JavaScript code block enclosed in \`\`\`javascript ... \`\`\`. This script will be executed inside the sandbox. Use document.getElementById() and other DOM methods to manipulate the apps you created. After the script, you can add a short confirmation message.` }]);
   const [chatHistory, setChatHistory] = useLocalStorage<Message[]>('chatHistory', []);
-  const [iframeContent, setIframeContent] = useLocalStorage('iframeContent', '');
+  const [apps, setApps] = useLocalStorage<{ title: string; html: string }[]>('apps', []);
   const [isLoading, setIsLoading] = useState(false);
 
   // State for API key verification and model loading
@@ -43,17 +50,19 @@ The window structure must be as follows:
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationState, setVerificationState] = useLocalStorage<VerificationState>('verificationState', 'unverified');
 
-
   // Transient state for messaging the iframe
-  const [newAppHtml, setNewAppHtml] = useState<string | null>(null);
+  const [newApp, setNewApp] = useState<{ title: string; html: string } | null>(null);
   const [scriptToRun, setScriptToRun] = useState<string | null>(null);
   const [clearSandbox, setClearSandbox] = useState<boolean>(false);
+  const [appsToRestore, setAppsToRestore] = useState<{ title: string; html: string }[]>([]);
 
   useEffect(() => {
     if (!apiKey) {
       setIsSettingsOpen(true);
     }
-  }, [apiKey]);
+    // On initial load, set the apps to be restored from localStorage
+    setAppsToRestore(apps);
+  }, [apiKey, apps]);
 
   const handleVerifyApiKey = useCallback(async (keyToVerify: string) => {
     setIsVerifying(true);
@@ -94,9 +103,10 @@ The window structure must be as follows:
 
       setChatHistory(prev => [...prev, { role: 'model', content: response.text }]);
 
-      if (response.html) {
-          setIframeContent(prev => prev + response.html);
-          setNewAppHtml(response.html);
+      if (response.html && response.title) {
+        const newAppPayload = { title: response.title, html: response.html };
+        setApps(prevApps => [...prevApps, newAppPayload]);
+        setNewApp(newAppPayload);
       }
       if (response.script) {
           setScriptToRun(response.script);
@@ -123,14 +133,14 @@ The window structure must be as follows:
           prompts={prompts}
           clearChat={() => {
               setChatHistory([]);
-              setIframeContent('');
+              setApps([]); // Clear the apps from state and localStorage
               setClearSandbox(true);
           }}
         />
-        <Sandbox 
-            initialContent={iframeContent}
-            newAppHtml={newAppHtml}
-            onAppAdded={() => setNewAppHtml(null)}
+        <Sandbox
+            appsToRestore={appsToRestore}
+            newApp={newApp}
+            onAppAdded={() => setNewApp(null)}
             scriptToRun={scriptToRun}
             onScriptRun={() => setScriptToRun(null)}
             clear={clearSandbox}

@@ -2,8 +2,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 
 interface SandboxProps {
-  initialContent: string;
-  newAppHtml: string | null;
+  appsToRestore: { title: string; html: string }[];
+  newApp: { title: string; html: string } | null;
   onAppAdded: () => void;
   scriptToRun: string | null;
   onScriptRun: () => void;
@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const desktop = document.getElementById('desktop');
   const windowStates = new Map();
   let windowCount = 0;
+  let highestZIndex = 1000; // Starting z-index for windows
 
   // Signal to the parent that the iframe is ready
   window.parent.postMessage({ type: 'IFRAME_READY' }, '*');
@@ -23,13 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function makeDraggable(elmnt) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
     const header = elmnt.querySelector('.ai-app-header');
-    
-    if (header) {
-      header.onmousedown = dragMouseDown;
-    } else {
-      // Fallback for older apps without a dedicated header
-      elmnt.onmousedown = dragMouseDown;
-    }
+    if (!header) return;
+
+    header.onmousedown = dragMouseDown;
 
     function dragMouseDown(e) {
       // Only drag if the clicked element is the header itself, not a button inside it.
@@ -39,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       pos3 = e.clientX;
       pos4 = e.clientY;
+      bringToFront(elmnt.id);
       document.onmouseup = closeDragElement;
       document.onmousemove = elementDrag;
     }
@@ -77,58 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
             icon.style.left = (icon.offsetLeft - pos1) + "px";
         };
     };
-  }
-
-  function initializeWindow(node) {
-    if (!node.id || windowStates.has(node.id)) {
-        if (!node.id) node.id = 'app-' + Date.now() + Math.random();
-    }
-
-    // Cascading window placement
-    const cascadeOffset = (windowCount % 10) * 30;
-    node.style.top = (20 + cascadeOffset) + 'px';
-    node.style.left = (20 + cascadeOffset) + 'px';
-    node.style.width = '400px'; // Default width
-    node.style.height = '300px'; // Default height
-    node.style.position = 'absolute'; // Ensure absolute positioning for top/left/width/height
-    windowCount++;
-
-    windowStates.set(node.id, { minimized: false, maximized: false, originalRect: null, zIndex: 1000 + windowCount });
-    node.style.zIndex = 1000 + windowCount; // Set initial z-index
-    makeDraggable(node);
-    makeResizable(node); // Make the window resizable
-
-    // Add resize handles
-    const resizers = ['tl', 't', 'tr', 'l', 'r', 'bl', 'b', 'br'];
-    resizers.forEach(direction => {
-        const resizer = document.createElement('div');
-        resizer.className = "resizer resizer-" + direction;
-        node.appendChild(resizer);
-    });
-
-    node.querySelector('.btn-close')?.addEventListener('click', () => {
-      const icon = document.querySelector(\`.desktop-icon[data-window-id="\${node.id}"]\`);
-      if (icon) icon.remove();
-      windowStates.delete(node.id);
-      node.remove();
-    });
-
-    node.querySelector('.btn-min')?.addEventListener('click', () => {
-      minimizeWindow(node.id, node);
-    });
-
-    node.querySelector('.btn-max')?.addEventListener('click', () => {
-      const state = windowStates.get(node.id);
-      if (state && state.maximized) {
-        restoreWindow(node.id, node);
-      } else {
-        maximizeWindow(node.id, node);
-      }
-    });
-
-    node.addEventListener('mousedown', () => {
-        bringToFront(node.id);
-    });
   }
 
   function makeResizable(elmnt) {
@@ -193,31 +139,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let highestZIndex = 1000; // Starting z-index for windows
 
+  }
+
   function bringToFront(windowId) {
       const windowEl = document.getElementById(windowId);
-      if (windowEl) {
+      if (windowEl && windowStates.has(windowId)) {
           highestZIndex++;
           windowEl.style.zIndex = highestZIndex;
           windowStates.get(windowId).zIndex = highestZIndex;
       }
   }
 
-  function minimizeWindow(windowId, windowEl) {
+  function minimizeWindow(windowId) {
+      const windowEl = document.getElementById(windowId);
+      if (!windowEl) return;
       const state = windowStates.get(windowId);
       if (!state || state.minimized) return;
       
-      // Store current position and size
       state.originalRect = {
           top: windowEl.style.top,
           left: windowEl.style.left,
           width: windowEl.style.width,
           height: windowEl.style.height,
-          zIndex: windowEl.style.zIndex, // Store z-index
+          zIndex: windowEl.style.zIndex,
       };
 
       windowEl.style.display = 'none';
       state.minimized = true;
-      state.maximized = false; // Cannot be maximized and minimized at the same time
+      state.maximized = false;
       
       const title = windowEl.querySelector('.app-title-text')?.textContent || 'Application';
       const icon = document.createElement('div');
@@ -233,42 +182,42 @@ document.addEventListener('DOMContentLoaded', () => {
       desktop.appendChild(icon);
       makeIconDraggable(icon);
       
-      // Pass only the windowId to avoid stale references in closures.
       icon.addEventListener('dblclick', () => restoreWindow(windowId));
   }
 
-  function maximizeWindow(windowId, windowEl) {
+  function maximizeWindow(windowId) {
+      const windowEl = document.getElementById(windowId);
+      if (!windowEl) return;
       const state = windowStates.get(windowId);
       if (!state || state.maximized) return;
 
-      // Store original position and size
       state.originalRect = {
           top: windowEl.style.top,
           left: windowEl.style.left,
           width: windowEl.style.width,
           height: windowEl.style.height,
-          zIndex: windowEl.style.zIndex, // Store z-index
+          zIndex: windowEl.style.zIndex,
       };
 
-      // Maximize to fill the desktop
       windowEl.style.top = '0px';
       windowEl.style.left = '0px';
       windowEl.style.width = '100%';
       windowEl.style.height = '100%';
-      windowEl.style.transform = 'none'; // Remove any drag-related transforms
       state.maximized = true;
-      state.minimized = false; // Cannot be maximized and minimized at the same time
-      bringToFront(windowId); // Bring to front when maximized
+      state.minimized = false;
+      bringToFront(windowId);
   }
 
-  function restoreWindow(windowId, windowEl) {
+  function restoreWindow(windowId) {
+      const windowEl = document.getElementById(windowId);
+      if (!windowEl) return;
       const state = windowStates.get(windowId);
       if (!state || (!state.minimized && !state.maximized)) return;
 
       if (state.minimized) {
           const iconEl = document.querySelector(\`.desktop-icon[data-window-id="\${windowId}"]\`);
           if (iconEl) iconEl.remove();
-          windowEl.style.display = ''; // Restore display
+          windowEl.style.display = '';
           state.minimized = false;
       }
 
@@ -277,30 +226,96 @@ document.addEventListener('DOMContentLoaded', () => {
           windowEl.style.left = state.originalRect.left;
           windowEl.style.width = state.originalRect.width;
           windowEl.style.height = state.originalRect.height;
-          windowEl.style.zIndex = state.originalRect.zIndex; // Restore z-index
+          windowEl.style.zIndex = state.originalRect.zIndex;
           state.maximized = false;
+          state.originalRect = null;
       }
-      state.originalRect = null; // Clear stored state after restore
+      bringToFront(windowId);
   }
 
-  // Handle messages from the parent app
+  function createAppWindow(title, contentHtml) {
+    const windowId = 'app-' + Date.now() + Math.random();
+    const win = document.createElement('div');
+    win.className = 'ai-app-window flex flex-col bg-gray-800 border border-gray-600 rounded-lg shadow-lg';
+    win.id = windowId;
+
+    // Default/cascading position and size
+    const cascadeOffset = (windowCount % 10) * 30;
+    win.style.position = 'absolute';
+    win.style.top = (20 + cascadeOffset) + 'px';
+    win.style.left = (20 + cascadeOffset) + 'px';
+    win.style.width = '450px';
+    win.style.height = '350px';
+
+    win.innerHTML = \`
+      <div class="ai-app-header flex items-center justify-between p-1 bg-gray-700 text-white rounded-t-lg cursor-move">
+        <span class="app-title-text font-bold text-sm ml-2">\${title}</span>
+        <div class="window-controls flex space-x-1">
+          <button class="btn-min w-4 h-4 rounded-full bg-yellow-500 hover:bg-yellow-600"></button>
+          <button class="btn-max w-4 h-4 rounded-full bg-green-500 hover:bg-green-600"></button>
+          <button class="btn-close w-4 h-4 rounded-full bg-red-500 hover:bg-red-600"></button>
+        </div>
+      </div>
+      <div class="ai-app-content flex-1 p-2 bg-gray-800/80 backdrop-blur-sm overflow-auto"></div>
+    \`;
+
+    const contentArea = win.querySelector('.ai-app-content');
+    contentArea.innerHTML = contentHtml;
+
+    // Add resize handles
+    const resizers = ['tl', 't', 'tr', 'l', 'r', 'bl', 'b', 'br'];
+    resizers.forEach(direction => {
+        const resizer = document.createElement('div');
+        resizer.className = "resizer resizer-" + direction;
+        win.appendChild(resizer);
+    });
+
+    desktop.appendChild(win);
+    windowCount++;
+
+    // Store state and apply behaviors
+    windowStates.set(windowId, { minimized: false, maximized: false, originalRect: null, zIndex: 1000 + windowCount });
+    win.style.zIndex = 1000 + windowCount;
+    highestZIndex = 1000 + windowCount;
+
+    makeDraggable(win);
+    makeResizable(win);
+
+    win.querySelector('.btn-close').addEventListener('click', () => {
+      const icon = document.querySelector(\`.desktop-icon[data-window-id="\${windowId}"]\`);
+      if (icon) icon.remove();
+      windowStates.delete(windowId);
+      win.remove();
+    });
+
+    win.querySelector('.btn-min').addEventListener('click', () => minimizeWindow(windowId));
+    win.querySelector('.btn-max').addEventListener('click', () => {
+        const state = windowStates.get(windowId);
+        if (state && state.maximized) {
+            restoreWindow(windowId);
+        } else {
+            maximizeWindow(windowId);
+        }
+    });
+
+    win.addEventListener('mousedown', () => bringToFront(windowId));
+  }
+
   window.addEventListener('message', (event) => {
     const { type, payload } = event.data;
 
-    if (type === 'ADD_APP') {
-      const template = document.createElement('template');
-      template.innerHTML = payload.trim();
-      const newNode = template.content.firstChild;
-      if (newNode && newNode.nodeType === 1) {
-          desktop.appendChild(newNode);
-          initializeWindow(newNode);
+    if (type === 'RESTORE_APPS') {
+        if (Array.isArray(payload)) {
+            payload.forEach(app => createAppWindow(app.title, app.html));
+        }
+    } else if (type === 'ADD_APP') {
+      // Payload should be { title: '...', html: '...' }
+      if (payload && payload.title && payload.html) {
+          createAppWindow(payload.title, payload.html);
       }
     } else if (type === 'RUN_SCRIPT') {
       try {
-        // Introduce a small delay to allow DOM to render after ADD_APP
-        setTimeout(() => {
-          new Function(payload)();
-        }, 100); // 100ms delay
+        setTimeout(() => { new Function(payload)(); }, 100);
       } catch (e) {
         console.error('Error executing script:', e);
       }
@@ -308,14 +323,14 @@ document.addEventListener('DOMContentLoaded', () => {
         desktop.innerHTML = '';
         windowStates.clear();
         windowCount = 0;
+        highestZIndex = 1000;
     }
   });
-
-  // Initialize any windows that were loaded from localStorage
-  document.querySelectorAll('.ai-app-window').forEach(initializeWindow);
 });
 `;
 
+// Note: The new architecture does not rely on initialContent for windows.
+// The host app should send 'ADD_APP' messages to restore state.
 const getIframeSrcDoc = (content: string) => `
 <!DOCTYPE html>
 <html>
@@ -335,19 +350,15 @@ const getIframeSrcDoc = (content: string) => `
 </html>
 `;
 
-export const Sandbox: React.FC<SandboxProps> = ({ 
-    initialContent, newAppHtml, onAppAdded, scriptToRun, onScriptRun, clear, onClear
+export const Sandbox: React.FC<SandboxProps> = ({
+    appsToRestore, newApp, onAppAdded, scriptToRun, onScriptRun, clear, onClear
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
 
-  const handleIframeLoad = useCallback(() => {
-    setIframeLoaded(true);
-  }, []);
-
   const handleMessage = useCallback((event: MessageEvent) => {
     if (event.data.type === 'IFRAME_READY') {
-      setIframeLoaded(true);
+        setIframeLoaded(true);
     }
   }, []);
 
@@ -361,18 +372,25 @@ export const Sandbox: React.FC<SandboxProps> = ({
   // Set initial content only once
   useEffect(() => {
     if (iframeRef.current) {
-      iframeRef.current.srcdoc = getIframeSrcDoc(initialContent);
+      iframeRef.current.srcdoc = getIframeSrcDoc(""); // Start with an empty desktop
       setIframeLoaded(false); // Reset loaded state on srcdoc change
     }
-  }, [initialContent]);
+  }, []);
+
+  // Restore apps when iframe is ready
+  useEffect(() => {
+    if (iframeLoaded && appsToRestore.length > 0 && iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({ type: 'RESTORE_APPS', payload: appsToRestore }, '*');
+    }
+  }, [iframeLoaded, appsToRestore]);
 
   // Send new app HTML via postMessage
   useEffect(() => {
-    if (iframeLoaded && newAppHtml && iframeRef.current?.contentWindow) {
-      iframeRef.current.contentWindow.postMessage({ type: 'ADD_APP', payload: newAppHtml }, '*');
+    if (iframeLoaded && newApp && iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({ type: 'ADD_APP', payload: newApp }, '*');
       onAppAdded();
     }
-  }, [iframeLoaded, newAppHtml, onAppAdded]);
+  }, [iframeLoaded, newApp, onAppAdded]);
 
   // Send script to run via postMessage
   useEffect(() => {
