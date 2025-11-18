@@ -73,10 +73,12 @@ export const parseAiResponse = async (
         throw new Error("API key is required to generate content.");
     }
     
-    const contents: Content[] = history.map(msg => ({
-        role: msg.role,
-        parts: [{ text: msg.content }],
-    }));
+    const contents: Content[] = history
+        .filter(msg => msg.role === 'user' || msg.role === 'model')
+        .map(msg => ({
+            role: msg.role as 'user' | 'model',
+            parts: [{ text: msg.content }],
+        }));
 
     try {
         const ai = new GoogleGenAI({ apiKey });
@@ -91,11 +93,57 @@ export const parseAiResponse = async (
         const rawText = response.text;
         return extractResponseParts(rawText);
 
-    } catch (error: any) { // Use 'any' to access error properties dynamically
+    } catch (error: any) {
         console.error("Gemini API Error:", error);
-        if (error && error.code === 503 && error.message && error.message.includes("overloaded")) {
-            throw new Error("The Gemini model is currently overloaded. Please try again in a few moments.");
+
+        // Default error message
+        let errorMessage = "An unexpected error occurred while contacting the Gemini API.";
+
+        // Google AI SDK often wraps the real error in `e.cause`
+        const cause = error.cause || error;
+        const status = cause?.status || cause?.code;
+        const message = cause?.message || error.message;
+
+        switch (status) {
+            case 'INVALID_ARGUMENT':
+            case 400:
+                errorMessage = "Invalid request. This may be due to an invalid API key or a malformed request. Please check your API key and model configuration.";
+                break;
+            case 'PERMISSION_DENIED':
+            case 403:
+                errorMessage = "Permission denied. This could be due to an incorrect API key, disabled billing for your project, or insufficient permissions. Please verify your API key and Google Cloud project settings.";
+                break;
+            case 'RESOURCE_EXHAUSTED':
+            case 429:
+                errorMessage = "Rate limit exceeded. You have sent too many requests in a given amount of time. Please wait a while before trying again.";
+                break;
+            case 'FAILED_PRECONDITION':
+                 errorMessage = `API key not valid. Please pass a valid API key. ${message}`;
+                 break;
+            case 'INTERNAL':
+            case 500:
+                errorMessage = "An internal server error occurred on the Gemini API side. Please try again later.";
+                break;
+            case 'UNAVAILABLE':
+            case 503:
+                errorMessage = "The Gemini model is currently overloaded or unavailable. Please try again in a few moments.";
+                break;
+            default:
+                if (message) {
+                    errorMessage = `An error occurred: ${message}`;
+                }
+                break;
         }
-        throw new Error("Failed to get response from Gemini API. Check your model configuration and API key.");
+        
+        // Append more details if available
+        if (cause && typeof cause === 'object') {
+            const details = JSON.stringify(cause, null, 2);
+            // Avoid duplicating the message if it's already in the errorMessage
+            if (!errorMessage.includes(message)) {
+                 errorMessage += `\nDetails: ${details}`;
+            }
+        }
+
+        throw new Error(errorMessage);
     }
 };

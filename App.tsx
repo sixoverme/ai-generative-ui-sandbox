@@ -13,27 +13,54 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [apiKey, setApiKey] = useLocalStorage('geminiApiKey', '');
   const [selectedModel, setSelectedModel] = useLocalStorage('selectedModel', 'gemini-1.5-flash');
-  const [prompts, setPrompts] = useLocalStorage<Prompt[]>('customPrompts', [{ id: '1', name: 'Default', content: `You are an expert AI assistant and developer. Your primary role is to build and interact with a virtual desktop environment for the user.
-
-**CREATION**: When asked to "create", "build", or "make" an app, tool, or game, respond ONLY with a single, self-contained HTML structure. The HTML must use TailwindCSS and include necessary JS in <script> tags.
-
-The root element must be a div with the following attributes:
-- class="ai-app-window"
-- A unique id attribute (e.g., id="pixel-art-editor")
-- Style attribute for initial position and size (e.g., style="position: absolute; top: 100px; left: 150px; width: 400px; height: 300px;")
-
-The window structure must be as follows:
-1.  **Main Container**: The \`ai-app-window\` div. It should be a flex container with a column layout.
-2.  **Header**: A draggable \`div\` with \`class="ai-app-header"\`. It should be a flex container with items aligned to the center.
-    -   **Title**: A \`span\` with \`class="app-title-text"\` for the application title.
-    -   **Window Controls**: A container \`div\` with \`class="window-controls"\` for the buttons.
-        -   **Minimize Button**: A \`button\` with \`class="btn-min"\`.
-        -   **Maximize Button**: A \`button\` with \`class="btn-max"\`.
-        -   **Close Button**: A \`button\` with \`class="btn-close"\`.
-3.  **Content**: A \`div\` with \`class="ai-app-content"\` where the main application interface will reside.
-4.  **Resizers**: Eight \`div\` elements for resizing the window, with classes like \`resizer resizer-tl\`, \`resizer resizer-t\`, etc.
-
-**INTERACTION**: To interact with an existing app (e.g., play a game, add a customer), respond with a JavaScript code block enclosed in \`\`\`javascript ... \`\`\`. This script will be executed inside the sandbox. Use document.getElementById() and other DOM methods to manipulate the apps you created. After the script, you can add a short confirmation message.` }]);
+  const [prompts, setPrompts] = useLocalStorage<Prompt[]>('customPrompts', [{ id: '1', name: 'Default', content: 
+    "You are an expert AI assistant and developer. Your primary role is to build and interact with a virtual desktop environment for the user.\n\n" +
+    "### Rules\n\n" +
+    "1.  **App Creation**: When asked to create an app, respond *only* with a single, self-contained HTML structure.\n" +
+    "    *   The root element must be a `div` with class `ai-app-window` and a unique `id`.\n" +
+    "    *   The app's HTML and CSS (via Tailwind classes) must be self-contained.\n" +
+    "    *   Any necessary JavaScript for the app to function must be in a single `<script>` tag.\n" +
+    "    *   **CRITICAL**: The final line of your app's `<script>` tag MUST dispatch a custom event to signal when it is ready. Example: `window.dispatchEvent(new CustomEvent('app-ready', { detail: { appId: 'your-app-id' } }));`\n\n" +
+    "2.  **App Interaction**: When asked to interact with an app, respond *only* with a JavaScript code block.\n" +
+    "    *   **IMPORTANT**: The system will try to infer the target application ID from your script if you use `document.getElementById('your-app-id')` or `document.querySelector('#your-app-id')`.\n" +
+    "    *   **BEST PRACTICE**: To ensure accuracy, it is still highly recommended that the very first line of your script is a comment specifying the target app's ID. Example: `// Target App: your-app-id`\n" +
+    "    *   The sandbox will wait for the app to be ready before running your script, so you can assume its DOM elements are available.\n\n" +
+    "### Examples\n\n" +
+    "**Creation Example (Pixel Art Editor):**\n" +
+    "```html\n" +
+    "<div id=\"pixel-art-editor\" class=\"ai-app-window ...\">\n" +
+    "  <div class=\"ai-app-content\">\n" +
+    "    <div id=\"pixel-grid\"></div>\n" +
+    "  </div>\n" +
+    "  <script>\n" +
+    "    // All app setup code (e.g., creating the grid) goes here.\n" +
+    "    function createPixelGrid() {\n" +
+    "      const grid = document.getElementById('pixel-grid');\n" +
+    "      for (let i = 0; i < 1024; i++) {\n" +
+    "        const pixel = document.createElement('div');\n" +
+    "        pixel.className = 'pixel';\n" +
+    "        grid.appendChild(pixel);\n" +
+    "      }\n" +
+    "    }\n" +
+    "    createPixelGrid();\n\n" +
+    "    // CRITICAL: Signal readiness as the very last step.\n" +
+    "    window.dispatchEvent(new CustomEvent('app-ready', { detail: { appId: 'pixel-art-editor' } }));\n" +
+    "  </script>\n" +
+    "</div>\n" +
+    "```\n\n" +
+    "**Interaction Example (Coloring a pixel):**\n" +
+    "```javascript\n" +
+    "// Target App: pixel-art-editor\n\n" +
+    "const pixelGrid = document.getElementById('pixel-grid');\n" +
+    "if (pixelGrid && pixelGrid.children[42]) {\n" +
+    "  pixelGrid.children[42].style.backgroundColor = 'red';\n" +
+    "  console.log('Successfully colored pixel red.');\n" +
+    "} else {\n" +
+    "  console.error('Could not find pixel #42.');\n" +
+    "}\n" +
+    "```\n" +
+    "After the script block, you may add a short confirmation message."
+  }]);
   const [chatHistory, setChatHistory] = useLocalStorage<Message[]>('chatHistory', []);
   const [iframeContent, setIframeContent] = useLocalStorage('iframeContent', '');
   const [isLoading, setIsLoading] = useState(false);
@@ -62,7 +89,6 @@ The window structure must be as follows:
       const models = await getAvailableModels(keyToVerify);
       setAvailableModels(models);
       setVerificationState('verified');
-      // If there's no selected model or the old one isn't in the new list, default to the first one
       if (!selectedModel || !models.includes(selectedModel)) {
         setSelectedModel(models[0] || '');
       }
@@ -75,10 +101,34 @@ The window structure must be as follows:
     }
   }, [setAvailableModels, setVerificationState, selectedModel, setSelectedModel]);
 
+  // Effect to handle messages from the sandbox iframe
+  useEffect(() => {
+    const handleSandboxMessage = (event: MessageEvent) => {
+      const { type, payload } = event.data;
+
+      if (type === 'INTERACTION_FAILED') {
+        setIsLoading(false);
+        setChatHistory(prev => [
+          ...prev,
+          {
+            role: 'system_error',
+            content: `System Correction: Your previous script failed because it did not follow the required format. \n\nReason: ${payload.reason}\n\nPlease try the action again, making sure your script starts with the comment 
+// Target App: <app-id>
+.`
+          }
+        ]);
+      }
+    };
+
+    window.addEventListener('message', handleSandboxMessage);
+    return () => {
+      window.removeEventListener('message', handleSandboxMessage);
+    };
+  }, [setChatHistory, setIsLoading]);
+
   const handleSendMessage = useCallback(async (message: string, systemPrompt?: string) => {
     if (!apiKey || verificationState !== 'verified') {
         setIsSettingsOpen(true);
-        // Optionally, add a message to the user
         setChatHistory(prev => [...prev, { role: 'model', content: 'Please set and verify your Gemini API key in the settings before sending a message.' }]);
         return;
     }
@@ -105,7 +155,7 @@ The window structure must be as follows:
     } catch (error) {
       console.error('Error generating response:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-      setChatHistory(prev => [...prev, { role: 'model', content: `Error: ${errorMessage}` }]);
+      setChatHistory(prev => [...prev, { role: 'error', content: errorMessage }]);
     } finally {
       setIsLoading(false);
     }

@@ -17,6 +17,35 @@ document.addEventListener('DOMContentLoaded', () => {
   const windowStates = new Map();
   let windowCount = 0;
 
+  // --- App Readiness Handshake ---
+  const readyApps = new Set();
+  const scriptQueue = new Map();
+
+  // Listen for apps to signal they are ready
+  window.addEventListener('app-ready', (e) => {
+    const { appId } = e.detail;
+    if (!appId) return;
+
+    console.log('App ' + appId + ' has signaled it is ready.');
+    readyApps.add(appId);
+
+    // Run any queued scripts for this app
+    if (scriptQueue.has(appId)) {
+      console.log('Executing queued scripts for ' + appId);
+      const scripts = scriptQueue.get(appId);
+      scripts.forEach(script => {
+        try {
+          new Function(script)();
+        } catch (err) {
+          console.error('Error executing queued script for ' + appId + ':', err);
+        }
+      });
+      scriptQueue.delete(appId); // Clear the queue for this app
+    }
+  });
+  // --- End App Readiness Handshake ---
+
+
   // Signal to the parent that the iframe is ready
   window.parent.postMessage({ type: 'IFRAME_READY' }, '*');
 
@@ -27,15 +56,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (header) {
       header.onmousedown = dragMouseDown;
     } else {
-      // Fallback for older apps without a dedicated header
       elmnt.onmousedown = dragMouseDown;
     }
 
     function dragMouseDown(e) {
-      // Only drag if the clicked element is the header itself, not a button inside it.
-      if (e.target.closest('button, input, textarea, select')) {
-        return;
-      }
+      if (e.target.closest('button, input, textarea, select')) return;
       e.preventDefault();
       pos3 = e.clientX;
       pos4 = e.clientY;
@@ -83,22 +108,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!node.id || windowStates.has(node.id)) {
         if (!node.id) node.id = 'app-' + Date.now() + Math.random();
     }
-
-    // Cascading window placement
-    const cascadeOffset = (windowCount % 10) * 30;
-    node.style.top = (20 + cascadeOffset) + 'px';
-    node.style.left = (20 + cascadeOffset) + 'px';
-    node.style.width = '400px'; // Default width
-    node.style.height = '300px'; // Default height
-    node.style.position = 'absolute'; // Ensure absolute positioning for top/left/width/height
+    
     windowCount++;
-
     windowStates.set(node.id, { minimized: false, maximized: false, originalRect: null, zIndex: 1000 + windowCount });
-    node.style.zIndex = 1000 + windowCount; // Set initial z-index
+    node.style.zIndex = 1000 + windowCount;
     makeDraggable(node);
-    makeResizable(node); // Make the window resizable
+    makeResizable(node);
 
-    // Add resize handles
     const resizers = ['tl', 't', 'tr', 'l', 'r', 'bl', 'b', 'br'];
     resizers.forEach(direction => {
         const resizer = document.createElement('div');
@@ -110,6 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const icon = document.querySelector(\`.desktop-icon[data-window-id="\${node.id}"]\`);
       if (icon) icon.remove();
       windowStates.delete(node.id);
+      readyApps.delete(node.id); // Clean up readiness state
       node.remove();
     });
 
@@ -120,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
     node.querySelector('.btn-max')?.addEventListener('click', () => {
       const state = windowStates.get(node.id);
       if (state && state.maximized) {
-        restoreWindow(node.id, node);
+        restoreWindow(node.id);
       } else {
         maximizeWindow(node.id, node);
       }
@@ -191,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  let highestZIndex = 1000; // Starting z-index for windows
+  let highestZIndex = 1000;
 
   function bringToFront(windowId) {
       const windowEl = document.getElementById(windowId);
@@ -206,18 +223,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const state = windowStates.get(windowId);
       if (!state || state.minimized) return;
       
-      // Store current position and size
       state.originalRect = {
           top: windowEl.style.top,
           left: windowEl.style.left,
           width: windowEl.style.width,
           height: windowEl.style.height,
-          zIndex: windowEl.style.zIndex, // Store z-index
+          zIndex: windowEl.style.zIndex,
       };
 
       windowEl.style.display = 'none';
       state.minimized = true;
-      state.maximized = false; // Cannot be maximized and minimized at the same time
+      state.maximized = false;
       
       const title = windowEl.querySelector('.app-title-text')?.textContent || 'Application';
       const icon = document.createElement('div');
@@ -233,7 +249,6 @@ document.addEventListener('DOMContentLoaded', () => {
       desktop.appendChild(icon);
       makeIconDraggable(icon);
       
-      // Pass only the windowId to avoid stale references in closures.
       icon.addEventListener('dblclick', () => restoreWindow(windowId));
   }
 
@@ -241,49 +256,66 @@ document.addEventListener('DOMContentLoaded', () => {
       const state = windowStates.get(windowId);
       if (!state || state.maximized) return;
 
-      // Store original position and size
       state.originalRect = {
           top: windowEl.style.top,
           left: windowEl.style.left,
           width: windowEl.style.width,
           height: windowEl.style.height,
-          zIndex: windowEl.style.zIndex, // Store z-index
+          zIndex: windowEl.style.zIndex,
       };
 
-      // Maximize to fill the desktop
       windowEl.style.top = '0px';
       windowEl.style.left = '0px';
       windowEl.style.width = '100%';
       windowEl.style.height = '100%';
-      windowEl.style.transform = 'none'; // Remove any drag-related transforms
+      windowEl.style.transform = 'none';
       state.maximized = true;
-      state.minimized = false; // Cannot be maximized and minimized at the same time
-      bringToFront(windowId); // Bring to front when maximized
+      state.minimized = false;
+      bringToFront(windowId);
   }
 
-  function restoreWindow(windowId, windowEl) {
+  function restoreWindow(windowId) {
+      const windowEl = document.getElementById(windowId);
       const state = windowStates.get(windowId);
-      if (!state || (!state.minimized && !state.maximized)) return;
+      if (!windowEl || !state || (!state.minimized && !state.maximized)) return;
 
       if (state.minimized) {
           const iconEl = document.querySelector(\`.desktop-icon[data-window-id="\${windowId}"]\`);
           if (iconEl) iconEl.remove();
-          windowEl.style.display = ''; // Restore display
+          windowEl.style.display = '';
           state.minimized = false;
       }
 
-      if (state.maximized && state.originalRect) {
-          windowEl.style.top = state.originalRect.top;
-          windowEl.style.left = state.originalRect.left;
-          windowEl.style.width = state.originalRect.width;
-          windowEl.style.height = state.originalRect.height;
-          windowEl.style.zIndex = state.originalRect.zIndex; // Restore z-index
+      if (state.maximized) {
+          if (state.originalRect) {
+            windowEl.style.top = state.originalRect.top;
+            windowEl.style.left = state.originalRect.left;
+            windowEl.style.width = state.originalRect.width;
+            windowEl.style.height = state.originalRect.height;
+            windowEl.style.zIndex = state.originalRect.zIndex;
+          }
           state.maximized = false;
       }
-      state.originalRect = null; // Clear stored state after restore
+      state.originalRect = null;
+      bringToFront(windowId);
   }
 
-  // Handle messages from the parent app
+  function parseTargetApp(script) {
+    // First, try to find the explicit comment
+    const commentMatch = script.match(/\\/\\/\\s*Target App:\\s*([\\w-]+)/);
+    if (commentMatch && commentMatch[1]) {
+      return commentMatch[1];
+    }
+
+    // If no comment, try to infer from document.getElementById or document.querySelector
+    const idMatch = script.match(/(?:document\\.getElementById|document\\.querySelector)\\(['"]([\\w-]+)['"]\\)/);
+    if (idMatch && idMatch[1]) {
+      return idMatch[1];
+    }
+
+    return null;
+  }
+
   window.addEventListener('message', (event) => {
     const { type, payload } = event.data;
 
@@ -296,33 +328,47 @@ document.addEventListener('DOMContentLoaded', () => {
           initializeWindow(newNode);
       }
     } else if (type === 'RUN_SCRIPT') {
-      try {
-        // Introduce a small delay to allow DOM to render after ADD_APP
-        setTimeout(() => {
+      const appId = parseTargetApp(payload);
+      if (appId && readyApps.has(appId)) {
+        // App is ready, run immediately
+        try {
           new Function(payload)();
-        }, 100); // 100ms delay
-      } catch (e) {
-        console.error('Error executing script:', e);
+        } catch (e) {
+          console.error('Error executing script for ' + appId + ':', e);
+        }
+      } else if (appId) {
+        // App not ready, queue the script
+        console.log('App ' + appId + ' not ready. Queuing script.');
+        if (!scriptQueue.has(appId)) {
+          scriptQueue.set(appId, []);
+        }
+        scriptQueue.get(appId).push(payload);
+      } else {
+        // Strict mode: No target, no execution.
+        const reason = 'Interaction script failed: No "// Target App: <app-id>" comment found.';
+        console.error(reason);
+        window.parent.postMessage({ type: 'INTERACTION_FAILED', payload: { reason } }, '*');
       }
     } else if (type === 'CLEAR') {
         desktop.innerHTML = '';
         windowStates.clear();
+        readyApps.clear();
+        scriptQueue.clear();
         windowCount = 0;
     }
   });
 
-  // Initialize any windows that were loaded from localStorage
   document.querySelectorAll('.ai-app-window').forEach(initializeWindow);
 });
 `;
 
 const getIframeSrcDoc = (content: string) => `
 <!DOCTYPE html>
-<html>
+<html class="h-full">
 <head>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-900 bg-grid-gray-700/[0.2] relative overflow-hidden">
+<body class="h-full bg-gray-900 bg-grid-gray-700/[0.2] relative overflow-hidden">
   <div id="desktop" class="w-full h-full">${content}</div>
   <script>${iframeScript}<\/script>
   <style>
@@ -330,6 +376,22 @@ const getIframeSrcDoc = (content: string) => `
         background-image: linear-gradient(to right, rgba(107, 114, 128, 0.1) 1px, transparent 1px), linear-gradient(to bottom, rgba(107, 114, 128, 0.1) 1px, transparent 1px);
         background-size: 20px 20px;
     }
+    /* Ensure resizers are visible and on top */
+    .resizer {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: transparent; /* Make them invisible but functional */
+        z-index: 10; /* Ensure they are on top of content */
+    }
+    .resizer-t { top: -5px; left: 5px; right: 5px; height: 10px; cursor: n-resize; }
+    .resizer-b { bottom: -5px; left: 5px; right: 5px; height: 10px; cursor: s-resize; }
+    .resizer-l { left: -5px; top: 5px; bottom: 5px; width: 10px; cursor: w-resize; }
+    .resizer-r { right: -5px; top: 5px; bottom: 5px; width: 10px; cursor: e-resize; }
+    .resizer-tl { top: -5px; left: -5px; width: 10px; height: 10px; cursor: nwse-resize; }
+    .resizer-tr { top: -5px; right: -5px; width: 10px; height: 10px; cursor: nesw-resize; }
+    .resizer-bl { bottom: -5px; left: -5px; width: 10px; height: 10px; cursor: nesw-resize; }
+    .resizer-br { bottom: -5px; right: -5px; width: 10px; height: 10px; cursor: nwse-resize; }
   </style>
 </body>
 </html>

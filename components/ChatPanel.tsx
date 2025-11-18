@@ -1,7 +1,6 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Message, Prompt } from '../types';
-import { SendIcon, TrashIcon, SparklesIcon, UserIcon } from './icons/Icons';
+import { SendIcon, TrashIcon, SparklesIcon, UserIcon, AlertTriangleIcon, CogIcon } from './icons/Icons';
 
 interface ChatPanelProps {
   history: Message[];
@@ -13,12 +12,38 @@ interface ChatPanelProps {
 
 const ChatMessage: React.FC<{ message: Message }> = ({ message }) => {
   const isModel = message.role === 'model';
+  const isUser = message.role === 'user';
+  const isError = message.role === 'error';
+  const isSystemError = message.role === 'system_error';
+
+  const getIcon = () => {
+    if (isModel) return <SparklesIcon className="w-5 h-5 text-white" />;
+    if (isUser) return <UserIcon className="w-5 h-5 text-white" />;
+    if (isError) return <AlertTriangleIcon className="w-5 h-5 text-white" />;
+    if (isSystemError) return <CogIcon className="w-5 h-5 text-white" />;
+    return null;
+  };
+
+  const getBubbleClass = () => {
+    if (isUser) return 'bg-blue-600 text-white';
+    if (isError) return 'bg-red-800 border border-red-700 text-red-100';
+    if (isSystemError) return 'bg-amber-800 border border-amber-700 text-amber-100';
+    return 'bg-gray-700'; // Model default
+  };
+  
+  const getAvatarClass = () => {
+      if (isUser) return 'bg-gray-600';
+      if (isError) return 'bg-red-600';
+      if (isSystemError) return 'bg-amber-600';
+      return 'bg-indigo-500'; // Model default
+  }
+
   return (
-    <div className={`flex items-start gap-3 my-4 ${isModel ? '' : 'flex-row-reverse'}`}>
-       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isModel ? 'bg-indigo-500' : 'bg-gray-600'}`}>
-        {isModel ? <SparklesIcon className="w-5 h-5 text-white" /> : <UserIcon className="w-5 h-5 text-white" />}
+    <div className={`flex items-start gap-3 my-4 ${isUser ? 'flex-row-reverse' : ''}`}>
+       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${getAvatarClass()}`}>
+        {getIcon()}
       </div>
-      <div className={`p-3 rounded-lg max-w-md ${isModel ? 'bg-gray-700' : 'bg-blue-600 text-white'}`}>
+      <div className={`p-3 rounded-lg max-w-md ${getBubbleClass()}`}>
         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
       </div>
     </div>
